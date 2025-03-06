@@ -2,7 +2,7 @@ package upmc.akka.leader
 
 import akka.actor._
 
-object Database {
+object DataBaseActor {
 	abstract class ObjetMusical
  	case class Note (pitch:Int, dur:Int, vol:Int) extends ObjetMusical
  	case class Chord (date:Int, notes:List[Note]) extends ObjetMusical
@@ -858,9 +858,9 @@ Chord  (1600 , List (Note(69 ,192, 79))))))
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Database () extends Actor {
+class DataBaseActor () extends Actor {
 
-    import Database._
+    import DataBaseActor._
 
     def receive = {
 

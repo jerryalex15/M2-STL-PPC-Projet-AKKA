@@ -1,21 +1,18 @@
 package upmc.akka.leader
 
-import akka.actor._
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
+import akka.actor.{Props,  Actor,  ActorRef,  ActorSystem}
 
-case class Beating(id: Int)
-case object Check
+case class Beating (n:Int)
 
-class Heart(id: Int) extends Actor {
-  // Send heartbeat every 1 second
-  context.system.scheduler.schedule(0.seconds, 1.second, self, Check)
+class HeartActor (val id : Int) extends Actor {
 
-  def receive = {
-    case Check => {
-      // Send heartbeat to parent (Checker)
-      context.parent ! Beating(id)
+    // ===== Gestion des messages reçus =====
+    
+    def receive = {
+        case Check => {
+            sender() ! Beating (id)
+        }
     }
-  }
+
 }
 

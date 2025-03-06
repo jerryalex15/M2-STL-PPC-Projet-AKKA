@@ -1,82 +1,79 @@
 package upmc.akka.leader
 
-import akka.actor._
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.collection.mutable.Map
+import akka.actor.{Props,  Actor,  ActorRef,  ActorSystem, ActorSelection}
 
-case class Alive(id: Int)
-case class Dead(id: Int)
-case object CheckEverybody
-case object IncrDead
+case class Check ()
+case class CheckEverybody ()
+case class IncrDead ()
+case class Alive (n:Int)
+case class Dead (n:Int)
 
-class Checker(id: Int, musiciens: List[Terminal]) extends Actor {
-  val heart = context.actorOf(Props(new Heart(id)), "heart")
-  val aliveMusicians = Map[Int, Boolean]()
-  val deadCount = Map[Int, Int]()
+class CheckerActor (node : ActorRef,  val id : Int) extends Actor {
 
-  // Initialize all musicians as alive
-  musiciens.foreach(m => {
-    aliveMusicians(m.id) = false
-    deadCount(m.id) = 0
-  })
+    var hearts = new Array[ActorSelection](4)   // Tableau des adresses des coeurs
+    var alive = new Array[Boolean](4)   // Tableau des nodes vivants
+    var noBeating = new Array[Int](4)   // Tableau comptant les chutes de tension des nodes
+    
+    // Initialisation pour soi-même
+    alive(id) = true
+    noBeating(id) = 0
 
-  // Mark self as alive
-  aliveMusicians(id) = true
-
-  // Schedule regular checks
-  context.system.scheduler.schedule(0.seconds, 2.seconds, self, CheckEverybody)
-  context.system.scheduler.schedule(0.seconds, 3.seconds, self, IncrDead)
-
-  def receive = {
-    case Beating(musicianId) => {
-      // Received heartbeat from a musician
-      aliveMusicians(musicianId) = true
-      deadCount(musicianId) = 0
-    }
-
-    case Alive(musicianId) => {
-      // Mark musician as alive
-      aliveMusicians(musicianId) = true
-      deadCount(musicianId) = 0
-      context.parent ! Alive(musicianId)
-    }
-
-    case CheckEverybody => {
-      // Check all musicians and notify parent about alive ones
-      musiciens.foreach(m => {
-        if (aliveMusicians(m.id) && m.id != id) {
-          // Send Alive message to the musician
-          val musicianPath = s"akka.tcp://MozartSystem${m.id}@${m.ip}:${m.port}/user/Musicien${m.id}"
-          try {
-            val musicianRef = context.actorSelection(musicianPath)
-            musicianRef ! Alive(id)
-          } catch {
-            case _: Exception => // Ignore if can't reach
-          }
+    // Initialisation pour les autres nodes
+    for(i <- 0 to 3 ) {
+        try {
+            // Récupération de l'adresse des coeurs distants
+            hearts(i) = context.actorSelection("akka.tcp://LeaderSystem" + i + "@127.0.0.1:600" + i + "/user/node" + i + "/heartActor" + i)
+        } catch {
+            case e : Throwable => println(s"[Error] Checker - Cannot contact musician $i: ${e.getMessage}")
         }
-      })
+        if (i != id) {
+            alive(i) = false
+            noBeating(i) = 0
+        }
+    }
+    
+
+    // ===== Gestion des messages reçus =====
+    
+
+    def receive = {
+
+        // === Timer de mort des Nodes 
+        case IncrDead => {
+            for(i <- 0 to 3 if i != id) {
+                
+                // On augmente le nombre de messages envoyés sans avoir entendu le coeur battre
+                noBeating(i) = noBeating(i) + 1
+                
+                if(noBeating(i) == 2) {
+                    // Avertissement
+                    node ! Message ("Checker - No response from Node " + i +", still waiting...")
+
+                } else if(noBeating(i) == 4) {
+                    // Cela fait trop longtemps qu'on a pas entendu le coeur battre, on déclare la mort
+                    alive(i) = false
+                    node ! Dead (i)
+                }
+
+            }
+        }
+
+        // === Vérification du coeur battant de tous les nodes
+        case CheckEverybody => {
+            // Envoi d'un Check à tous les coeurs
+            for(i <- 0 to 3 if i != id) {
+                hearts(i) ! Check
+            }
+        }
+
+        // === Réponse d'un coeur n° n
+        case Beating (n) => {
+            noBeating(n) = 0    // On met son nombre de non-réponses à 0
+            alive(n) = true     // On le considère vivant
+            node ! Message ("Checker - heart" + n + " is beating")
+            node ! Alive (n)    // On signifie au node qu'il est vivant
+        }
+
     }
 
-    case IncrDead => {
-      // Increment dead count for musicians that haven't sent heartbeats
-      musiciens.foreach(m => {
-        if (!aliveMusicians(m.id) && m.id != id) {
-          deadCount(m.id) += 1
-          if (deadCount(m.id) >= 3) {
-            // If no heartbeat for 3 checks, consider dead
-            context.parent ! Dead(m.id)
-          }
-        }
-      })
-
-      // Reset alive status for next round
-      musiciens.foreach(m => {
-        if (m.id != id) {
-          aliveMusicians(m.id) = false
-        }
-      })
-    }
-  }
 }
-

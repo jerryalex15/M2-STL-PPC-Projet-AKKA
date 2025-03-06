@@ -1,24 +1,21 @@
 package upmc.akka.leader
 
-import akka.actor._
-import scala.util.Random
+import akka.actor.{Props,  Actor,  ActorRef,  ActorSystem}
 
-case class GetMeasure(nb: Int)
+class ProviderActor(musician : ActorRef) extends Actor {
+    import DataBaseActor._ 
 
-class Provider extends Actor {
-  val database = context.actorOf(Props[Database], "database")
-  val random = new Random()
+    val database = context.actorOf(Props[DataBaseActor], "databaseActor")
+    
+    def receive = {
 
-  def receive = {
-    case GetMeasure(nb) => {
-      // Request measures from the database
-      database ! GetMeasure(nb)
+        case GetMeasure (diceResult) => {
+            database ! GetMeasure (diceResult)
+        }
+
+        case Measure (lm) => {
+            musician ! Measure (lm)
+        }
+
     }
-
-    case measure: Measure => {
-      // Forward the measure to the parent (Musician)
-      context.parent ! measure
-    }
-  }
 }
-
