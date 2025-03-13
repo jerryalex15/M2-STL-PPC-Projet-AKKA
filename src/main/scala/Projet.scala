@@ -24,9 +24,9 @@ object Projet {
           // Initialisation du node <id>
           val system = ActorSystem("LeaderSystem" + id, ConfigFactory.load().getConfig("system" + id))
 
-          val node = system.actorOf(Props(new NodeActor(id)), "node"+id)
+          val networkActor = system.actorOf(Props(new NetworkActor(id)), "node"+id)
 
-          node ! Start
+          networkActor ! Start
      }
 
 }

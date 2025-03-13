@@ -7,135 +7,132 @@ import scala.concurrent.ExecutionContext
 import ExecutionContext.Implicits.global
 import scala.util.Random
 
-// === Messages échangés
-case class PlayConductor ()
-case class Exit()
-case class Elected ()
-case class Election ()
-case class IsNeedElection ()
-case class LearnCurrentConductorId(id:Int)
+case class JoueChefOrchestre ()
+case class SelfTerminate()
+case class ChefOrchestreElu ()
+case class CreeElection ()
+case class CreationElection ()
+case class GetNouveauChefOrchestre(id:Int)
 
 class MusicianActor (node : ActorRef, val id : Int) extends Actor {
   import DataBaseActor._
-
-  // === Initialisation du Musicien ===
-
-  // Variables pour les informations globales
+  
   val database = context.actorOf(Props[DataBaseActor], "databaseActor")
-  val provider = context.actorOf(Props(new ProviderActor(self)), "providerActor") // Le Provider fourni les mesures
-  val player = context.actorOf(Props[PlayerActor], name = "playerActor")  // Le Player de ce Musicien
-  var musicians = new Array[ActorSelection](4)    // Le tableau des adresses de tous les Musiciens distants
-  var alives = new Array[Boolean](4)   // Le tableau de si les Musiciens de chaque index sont vivants
-  var currentConductorId = -1     // Le chef d'orchestre actuel
-  var nbOthersAlive = 0; // Nombre de noeuds en vie (hormis soi-même)
+  val provider = context.actorOf(Props(new ProviderActor(self)), "providerActor")
+  val player = context.actorOf(Props[PlayerActor], name = "playerActor")
+  
+  var autresMusiciens = new Array[ActorSelection](4)
+  var musiciensVivant = new Array[Boolean](4)
+  var currentChefOrchestre = -1
+  var nbAutresMusiciensVivant = 0;
 
-  var needElection = false
-  var isScheduling = false // Mutex pour le scheduler
+  var besoinElection = false
+  var estPrevu = false // Mutex pour le scheduler
 
   val scheduler = context.system.scheduler
-  val TIME_BASE = 1800 milliseconds
-  val WAITING_TIME_BEFORE_EXIT = 30000 milliseconds
+  val tempsAttenteEntreNote = 1800 milliseconds
+  val tempsAttenteAvantExit = 30000 milliseconds
 
-  var isAlone = true
-  alives(id) = true
+  var estSeul = true
+  musiciensVivant(id) = true
 
   for (i <- 0 to 3 if i != id) {
     try {
-      musicians(i) = context.actorSelection("akka.tcp://LeaderSystem" + i + "@127.0.0.1:600" + i + "/user/node" + i + "/musicianActor" + i)
-      musicians(i) ! Alive(id)
+      autresMusiciens(i) = context.actorSelection("akka.tcp://LeaderSystem" + i + "@127.0.0.1:600" + i + "/user/node" + i + "/musicianActor" + i)
+      autresMusiciens(i) ! Alive(id)
     } catch {
-      case e: Throwable => println(s"[Error] Musician - Cannot contact musician $i: ${e.getMessage}")
+      case e: Throwable => println(s"[Error] {Musicien} Pas de communication avec le musicien $i: ${e.getMessage}")
     }
   }
 
   def receive: Receive = {
-    case IsNeedElection =>
+    case CreationElection =>
       for (i <- 0 to 3) {
-        if (alives(i) && currentConductorId == -1) {
-          needElection = true
+        if (musiciensVivant(i) && currentChefOrchestre == -1) {
+          besoinElection = true
         }
       }
-      if (needElection) self ! Election
+      if (besoinElection) self ! CreeElection
 
-    case PlayConductor =>
-      if (currentConductorId == id) {
+    case JoueChefOrchestre =>
+      if (currentChefOrchestre == id) {
         val diceRoll = Random.nextInt(6) + Random.nextInt(6) + 2
         provider ! GetMeasure (diceRoll)
       }
 
     case Measure (chordlist) =>
-      if(currentConductorId == id) {
-        if (nbOthersAlive > 0) {
-          val aliveMusicians = (0 until 4).filter(i => i != id && alives(i)).toList
+      if(currentChefOrchestre == id) {
+        if (nbAutresMusiciensVivant > 0) {
+          val aliveMusicians = (0 until 4).filter(i => i != id && musiciensVivant(i)).toList
           val chosenId = aliveMusicians(Random.nextInt(aliveMusicians.length))
-          println(s"Musician - Sending measure to musician $chosenId")
+          println(s"{Musicien} Envoi la mesure au musicien $chosenId")
 
-          // Mutex : Planifie PlayConductor seulement si rien n'est en cours
-          if (!isScheduling) {
-            isScheduling = true
-            musicians(chosenId) ! Measure(chordlist)
-            scheduler.scheduleOnce(TIME_BASE) {
-              self ! PlayConductor
-              isScheduling = false // Libère le verrou après l'exécution
+          // JoueChefOrchestre seulement si rien n'est en cours
+          if (!estPrevu) {
+            estPrevu = true
+            autresMusiciens(chosenId) ! Measure(chordlist)
+            scheduler.scheduleOnce(tempsAttenteEntreNote) {
+              self ! JoueChefOrchestre
+              estPrevu = false
             }
           }
         } else {
-          println("Musician - No musicians available. Waiting...")
-          isAlone = true
-          scheduler.scheduleOnce(WAITING_TIME_BEFORE_EXIT, self, Exit)
+          println("{Musicien} Pas de musicien disponible. En attente...")
+          estSeul = true
+          scheduler.scheduleOnce(tempsAttenteAvantExit, self, SelfTerminate)
         }
       } else {    // Si on est un simple Musicien, on a reçu cette Measure du chef d'orchestre
-        println("Musician => Measure received, playing...")
+        println("{Musicien} Mesure reçu, joue...")
         player ! Measure (chordlist)
       }
 
     case Alive(n) =>
-      isAlone = false
-      println(s"alives$n = " + alives(n))
-      if (!alives(n)) {
-        alives(n) = true
-        nbOthersAlive += 1
-        println(s"Musician - Musician $n is alive. Total: $nbOthersAlive")
-        if (nbOthersAlive > 0 && currentConductorId == id){
-          self ! PlayConductor
+      estSeul = false
+      println(s"alives$n = " + musiciensVivant(n))
+      if (!musiciensVivant(n)) {
+        musiciensVivant(n) = true
+        nbAutresMusiciensVivant += 1
+        println(s"{Musicien} - Musicien $n est vivant. Total: $nbAutresMusiciensVivant")
+        if (nbAutresMusiciensVivant > 0 && currentChefOrchestre == id){
+          self ! JoueChefOrchestre
         }
       }
-      if(currentConductorId != -1) musicians(n) ! LearnCurrentConductorId (currentConductorId)
+      if(currentChefOrchestre != -1) autresMusiciens(n) ! GetNouveauChefOrchestre (currentChefOrchestre)
 
     case Dead(n) =>
-      if (alives(n)) {
-        alives(n) = false
-        nbOthersAlive -= 1
-        println(s"Musician - Musician $n is dead. Total: $nbOthersAlive")
+      if (musiciensVivant(n)) {
+        musiciensVivant(n) = false
+        nbAutresMusiciensVivant -= 1
+        println(s"{Musicien} Musicien $n est mort. Total: $nbAutresMusiciensVivant")
       }
-      if (currentConductorId == n || currentConductorId == -1) self ! Election
+      if (currentChefOrchestre == n || currentChefOrchestre == -1) self ! CreeElection
 
-    case Exit =>
-      if (isAlone) {
-        println(s"Musician - Musician $id is exiting (alone for too long).")
+    case SelfTerminate =>
+      if (estSeul) {
+        println(s"{Musicien} Musicien $id a quitté (Seul).")
         context.system.terminate()
         System.exit(0)
       }
 
-    case LearnCurrentConductorId(n) =>
-      if (n != id && alives(n)) {
-        currentConductorId = n
-        println(s"Musician$id - Learning current conductor: $n")
+    case GetNouveauChefOrchestre(n) =>
+      if (n != id && musiciensVivant(n)) {
+        currentChefOrchestre = n
+        println(s"{Musicien} Musicien $id - Nouveau chef d'orchestre: $n")
       }
 
-    case Election =>
-      val aliveMusicians = (0 until 4).filter(alives).toList
+    case CreeElection =>
+      val aliveMusicians = (0 until 4).filter(musiciensVivant).toList
       if (aliveMusicians.contains(id)) {
-        self ! Elected
+        self ! ChefOrchestreElu
       } else if (aliveMusicians.nonEmpty) {
-        currentConductorId = aliveMusicians.head
+        currentChefOrchestre = aliveMusicians.head
       }
 
-    case Elected =>
-      if (currentConductorId != id) {
-        currentConductorId = id
-        println(s"Musician - Musician $id has been elected as the new conductor.")
-        self ! PlayConductor
+    case ChefOrchestreElu =>
+      if (currentChefOrchestre != id) {
+        currentChefOrchestre = id
+        println(s"{Musicien} Musicien $id est élu en temps que nouveau chef d'orchestre.")
+        self ! JoueChefOrchestre
       }
   }
 }

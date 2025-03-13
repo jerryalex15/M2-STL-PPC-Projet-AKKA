@@ -3,75 +3,66 @@ package upmc.akka.leader
 import akka.actor.{Props,  Actor,  ActorRef,  ActorSystem, ActorSelection}
 
 case class Check ()
-case class CheckEverybody ()
-case class IncrDead ()
+case class CheckOthersHearts ()
+case class CheckSelfHeart ()
 case class Alive (n:Int)
 case class Dead (n:Int)
 
 class CheckerActor (node : ActorRef,  val id : Int) extends Actor {
 
-    var hearts = new Array[ActorSelection](4)   // Tableau des adresses des coeurs
-    var alive = new Array[Boolean](4)   // Tableau des nodes vivants
-    var noBeating = new Array[Int](4)   // Tableau comptant les chutes de tension des nodes
+    // Adresses des coeurs
+    var heartsAddress = new Array[ActorSelection](4) 
+    // Newtorks vivants
+    var networksAlive = new Array[Boolean](4)
+    // Temps sans réponse pour chaque coeurs
+    var noResponseHeartsCount = new Array[Int](4) 
     
-    // Initialisation pour soi-même
-    alive(id) = true
-    noBeating(id) = 0
+    // Init
+    networksAlive(id) = true
+    noResponseHeartsCount(id) = 0
 
-    // Initialisation pour les autres nodes
+    // Init pour les autres network
     for(i <- 0 to 3 ) {
         try {
-            // Récupération de l'adresse des coeurs distants
-            hearts(i) = context.actorSelection("akka.tcp://LeaderSystem" + i + "@127.0.0.1:600" + i + "/user/node" + i + "/heartActor" + i)
+            heartsAddress(i) = context.actorSelection("akka.tcp://LeaderSystem" + i + "@127.0.0.1:600" + i + "/user/node" + i + "/heartActor" + i)
         } catch {
-            case e : Throwable => println(s"[Error] Checker - Cannot contact musician $i: ${e.getMessage}")
+            case e : Throwable => println(s"[Error] {Checker} Pas de communication avec le musicien $i: ${e.getMessage}")
         }
         if (i != id) {
-            alive(i) = false
-            noBeating(i) = 0
+            networksAlive(i) = false
+            noResponseHeartsCount(i) = 0
         }
     }
     
-
-    // ===== Gestion des messages reçus =====
-    
-
     def receive = {
 
-        // === Timer de mort des Nodes 
-        case IncrDead => {
+        case CheckSelfHeart => {
             for(i <- 0 to 3 if i != id) {
-                
-                // On augmente le nombre de messages envoyés sans avoir entendu le coeur battre
-                noBeating(i) = noBeating(i) + 1
-                
-                if(noBeating(i) == 2) {
-                    // Avertissement
-                    node ! Message ("Checker - No response from Node " + i +", still waiting...")
+                noResponseHeartsCount(i) = noResponseHeartsCount(i) + 1
 
-                } else if(noBeating(i) == 4) {
-                    // Cela fait trop longtemps qu'on a pas entendu le coeur battre, on déclare la mort
-                    alive(i) = false
-                    node ! Dead (i)
+                noResponseHeartsCount(i) match {
+                    case 2 => // Pas de réponse, on attend encore
+                        node ! Message ("{Checker} Pas de réponse du Network " + i +", en attente...")
+                    case 4 => // Pas de réponse depuis longtemps, on le déclare mort
+                        networksAlive(i) = false
+                        node ! Dead (i)
+                    case _ => null
                 }
-
             }
         }
 
-        // === Vérification du coeur battant de tous les nodes
-        case CheckEverybody => {
-            // Envoi d'un Check à tous les coeurs
+        case CheckOthersHearts => {
             for(i <- 0 to 3 if i != id) {
-                hearts(i) ! Check
+                heartsAddress(i) ! Check
             }
         }
 
-        // === Réponse d'un coeur n° n
+        // Réponse d'un coeur
         case Beating (n) => {
-            noBeating(n) = 0    // On met son nombre de non-réponses à 0
-            alive(n) = true     // On le considère vivant
-            node ! Message ("Checker - heart" + n + " is beating")
-            node ! Alive (n)    // On signifie au node qu'il est vivant
+            noResponseHeartsCount(n) = 0
+            networksAlive(n) = true
+            node ! Message ("{Checker} Coeur" + n + " est vivant")
+            node ! Alive (n)
         }
 
     }

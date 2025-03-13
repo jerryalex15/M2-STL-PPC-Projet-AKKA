@@ -15,7 +15,7 @@ import akka.actor.{Props, Actor, ActorRef, ActorSystem}
 object PlayerActor {
   case class MidiNote (pitch:Int, vel:Int, dur:Int, at:Int) 
   val info = MidiSystem.getMidiDeviceInfo().filter(_.getName == "Gervill").headOption
-  // or "SimpleSynth virtual input" or "Gervill"
+
   val device = info.map(MidiSystem.getMidiDevice).getOrElse {
     println("[ERROR] Could not find Gervill synthesizer.")
     sys.exit(1)
@@ -36,8 +36,6 @@ object PlayerActor {
   }
 
 }
-
-//////////////////////////////////////////////////
 
 class PlayerActor () extends Actor {
   import DataBaseActor._

@@ -6,8 +6,6 @@ case class Beating (n:Int)
 
 class HeartActor (val id : Int) extends Actor {
 
-    // ===== Gestion des messages reçus =====
-    
     def receive = {
         case Check => {
             sender() ! Beating (id)
