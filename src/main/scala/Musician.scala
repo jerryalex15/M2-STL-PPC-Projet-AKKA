@@ -17,7 +17,6 @@ case class GetNouveauChefOrchestre(id:Int)
 class MusicianActor (node : ActorRef, val id : Int) extends Actor {
   import DataBaseActor._
   
-  val database = context.actorOf(Props[DataBaseActor], "databaseActor")
   val provider = context.actorOf(Props(new ProviderActor(self)), "providerActor")
   val player = context.actorOf(Props[PlayerActor], name = "playerActor")
   
